@@ -18,7 +18,14 @@ import React from "react";
  *
  * Everything is static for now — the cabin scene is a stage, not yet interactive.
  */
-export function CabinScene() {
+export type CabinSceneProps = {
+  /** Called when the user clicks the mini fridge. */
+  onFridgeClick?: () => void;
+  /** Whether to show a red "!" badge above the fridge. */
+  fridgeUnread?: boolean;
+};
+
+export function CabinScene({ onFridgeClick, fridgeUnread = false }: CabinSceneProps = {}) {
   return (
     <svg
       viewBox="0 0 1600 1000"
@@ -48,7 +55,7 @@ export function CabinScene() {
       {/* === FURNITURE === */}
       <SideTable x={1180} y={560} />
       <RecordPlayer x={1190} y={500} />
-      <MiniFridge x={1410} y={620} />
+      <MiniFridge x={1410} y={620} onClick={onFridgeClick} unread={fridgeUnread} />
       <PottedPlant x={70} y={730} />
 
       <Armchair x={310} y={680} flip={false} />
@@ -818,11 +825,40 @@ function RecordPlayer({ x, y }: { x: number; y: number }) {
 /* ──────────────────────────────────────────────────────────────────────
    MINI FRIDGE
    ────────────────────────────────────────────────────────────────────── */
-function MiniFridge({ x, y }: { x: number; y: number }) {
+function MiniFridge({
+  x,
+  y,
+  onClick,
+  unread = false,
+}: {
+  x: number;
+  y: number;
+  onClick?: () => void;
+  unread?: boolean;
+}) {
   const w = 150;
   const h = 250;
+  const interactive = !!onClick;
   return (
-    <g transform={`translate(${x}, ${y})`}>
+    <g
+      transform={`translate(${x}, ${y})`}
+      onClick={onClick}
+      style={interactive ? { cursor: "pointer" } : undefined}
+      className={interactive ? "barnhouse-fridge" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      role={interactive ? "button" : undefined}
+      aria-label={interactive ? "Open the note board on the fridge" : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+    >
       <ellipse cx={w / 2} cy={h + 8} rx={w / 2} ry="10" fill="#000" opacity="0.3" />
       {/* body */}
       <rect x="0" y="0" width={w} height={h} rx="10" fill="#f0ead6" />
@@ -837,8 +873,35 @@ function MiniFridge({ x, y }: { x: number; y: number }) {
       <rect x={w * 0.45} y={h * 0.62} width="22" height="14" fill="#ffd966" rx="2" />
       <text x={w * 0.45 + 11} y={h * 0.62 + 11} textAnchor="middle" fontSize="9" fill="#5a3520" fontFamily="var(--font-fredoka), system-ui">us</text>
       <path d={`M ${w * 0.25} ${h * 0.75} l 5 -5 l 5 5 l -5 5 z`} fill="#3a8a5a" />
+      {/* a small "note pinned" magnet to hint that the fridge is the notes spot */}
+      <g transform={`translate(${w * 0.5}, ${h * 0.18})`}>
+        <rect x="-16" y="-10" width="32" height="20" rx="2" fill="#fff9ec" stroke="#c4a878" strokeWidth="0.8" />
+        <circle cx="0" cy="-10" r="2.5" fill="#c44a4a" />
+        <line x1="-10" y1="-2" x2="10" y2="-2" stroke="#c4b896" strokeWidth="0.8" />
+        <line x1="-10" y1="3" x2="6" y2="3" stroke="#c4b896" strokeWidth="0.8" />
+      </g>
       {/* base */}
       <rect x="6" y={h - 14} width={w - 12} height="6" fill="#c4b896" />
+
+      {/* unread "!" badge — floats above the top-right corner */}
+      {unread && (
+        <g transform={`translate(${w - 6}, 4)`} style={{ pointerEvents: "none" }}>
+          <circle r="22" fill="#ff4444" opacity="0.35" className="animate-breathe" />
+          <circle r="16" fill="#e22b2b" stroke="#fff9ec" strokeWidth="3" />
+          <text
+            x="0"
+            y="1"
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontFamily="var(--font-fredoka), system-ui, sans-serif"
+            fontSize="22"
+            fontWeight="700"
+            fill="#fff9ec"
+          >
+            !
+          </text>
+        </g>
+      )}
     </g>
   );
 }

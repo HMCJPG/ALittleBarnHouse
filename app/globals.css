@@ -41,3 +41,18 @@ body::before {
   50% { opacity: 1; }
 }
 body::before { animation: globalTwinkle 6s ease-in-out infinite; }
+
+/* Clickable cabin items — gentle lift on hover, focus ring on keyboard nav. */
+.barnhouse-fridge {
+  transition: transform 180ms ease, filter 180ms ease;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.barnhouse-fridge:hover,
+.barnhouse-fridge:focus-visible {
+  transform: translateY(-3px) scale(1.015);
+  filter: drop-shadow(0 6px 10px rgba(255, 200, 130, 0.45));
+}
+.barnhouse-fridge:focus-visible {
+  outline: none;
+}
