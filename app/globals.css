@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 20% 10%, #2d2870 0%, transparent 55%),
+    radial-gradient(ellipse at 85% 80%, #1a1850 0%, transparent 55%),
+    linear-gradient(180deg, #0e0b2e 0%, #1a1850 60%, #0e0b2e 100%);
+  min-height: 100vh;
+  color: #fff9ec;
+  overflow-x: hidden;
+}
+
+/* tiny twinkling stars layer in body, behind the frame */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,0.85), transparent 60%),
+    radial-gradient(1px 1px at 88% 22%, rgba(255,255,255,0.7), transparent 60%),
+    radial-gradient(1.5px 1.5px at 35% 8%, rgba(255,249,236,0.95), transparent 60%),
+    radial-gradient(1px 1px at 62% 12%, rgba(255,255,255,0.65), transparent 60%),
+    radial-gradient(1px 1px at 78% 38%, rgba(255,255,255,0.8), transparent 60%),
+    radial-gradient(1.5px 1.5px at 18% 70%, rgba(255,255,255,0.6), transparent 60%),
+    radial-gradient(1px 1px at 5% 55%, rgba(255,249,236,0.7), transparent 60%),
+    radial-gradient(1px 1px at 95% 65%, rgba(255,255,255,0.6), transparent 60%),
+    radial-gradient(1px 1px at 50% 92%, rgba(255,255,255,0.5), transparent 60%);
+  z-index: 0;
+}
+
+/* gentle global twinkle */
+@keyframes globalTwinkle {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+body::before { animation: globalTwinkle 6s ease-in-out infinite; }
