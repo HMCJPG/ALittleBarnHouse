@@ -42,16 +42,16 @@ body::before {
 }
 body::before { animation: globalTwinkle 6s ease-in-out infinite; }
 
-/* Clickable cabin items — gentle lift on hover, focus ring on keyboard nav. */
+/* Clickable cabin items — gentle glow on hover.
+   Note: we deliberately do NOT use CSS `transform` here because it would
+   override the SVG `transform` attribute that positions the fridge and
+   make it teleport across the canvas. Filter-only effects are safe. */
 .barnhouse-fridge {
-  transition: transform 180ms ease, filter 180ms ease;
-  transform-box: fill-box;
-  transform-origin: center;
+  transition: filter 180ms ease;
 }
 .barnhouse-fridge:hover,
 .barnhouse-fridge:focus-visible {
-  transform: translateY(-3px) scale(1.015);
-  filter: drop-shadow(0 6px 10px rgba(255, 200, 130, 0.45));
+  filter: drop-shadow(0 4px 10px rgba(255, 200, 130, 0.6)) brightness(1.07);
 }
 .barnhouse-fridge:focus-visible {
   outline: none;
