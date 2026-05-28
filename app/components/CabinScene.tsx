@@ -23,9 +23,18 @@ export type CabinSceneProps = {
   onFridgeClick?: () => void;
   /** Whether to show a red "!" badge above the fridge. */
   fridgeUnread?: boolean;
+  /** Called when the user clicks the record player. */
+  onRecordPlayerClick?: () => void;
+  /** Whether the record player is "active" (music currently spinning/playing). */
+  recordPlayerActive?: boolean;
 };
 
-export function CabinScene({ onFridgeClick, fridgeUnread = false }: CabinSceneProps = {}) {
+export function CabinScene({
+  onFridgeClick,
+  fridgeUnread = false,
+  onRecordPlayerClick,
+  recordPlayerActive = false,
+}: CabinSceneProps = {}) {
   return (
     <svg
       viewBox="0 0 1600 1000"
@@ -54,7 +63,12 @@ export function CabinScene({ onFridgeClick, fridgeUnread = false }: CabinScenePr
 
       {/* === FURNITURE === */}
       <SideTable x={1180} y={560} />
-      <RecordPlayer x={1190} y={500} />
+      <RecordPlayer
+        x={1190}
+        y={500}
+        onClick={onRecordPlayerClick}
+        active={recordPlayerActive}
+      />
       <MiniFridge x={1410} y={620} onClick={onFridgeClick} unread={fridgeUnread} />
       <PottedPlant x={70} y={730} />
 
@@ -776,47 +790,116 @@ function SideTable({ x, y }: { x: number; y: number }) {
 /* ──────────────────────────────────────────────────────────────────────
    RECORD PLAYER (sits on top of the side table)
    ────────────────────────────────────────────────────────────────────── */
-function RecordPlayer({ x, y }: { x: number; y: number }) {
+function RecordPlayer({
+  x,
+  y,
+  onClick,
+  active = false,
+}: {
+  x: number;
+  y: number;
+  onClick?: () => void;
+  active?: boolean;
+}) {
   const w = 220;
   const h = 60;
+  const interactive = !!onClick;
+  // The record always spins decoratively at a leisurely pace; when active
+  // (real music playing) it spins faster.
+  const spinDuration = active ? "1.6s" : "3s";
   return (
     <g transform={`translate(${x}, ${y})`}>
-      {/* base */}
-      <rect x="0" y="0" width={w} height={h} rx="4" fill="#3a2113" />
-      <rect x="0" y="0" width={w} height="8" fill="#5e3a25" />
-      <rect x="0" y={h - 4} width={w} height="4" fill="#1a0a02" />
-      {/* turntable platter */}
-      <g transform={`translate(${w * 0.32}, -6)`}>
-        <ellipse cx="0" cy="6" rx="64" ry="10" fill="#1a0a02" />
-        <ellipse cx="0" cy="0" rx="64" ry="14" fill="#5e3a25" />
-        {/* the record itself spinning */}
-        <g className="animate-record" style={{ transformOrigin: "0 0" }}>
-          <ellipse cx="0" cy="0" rx="56" ry="12" fill="#0a0a0a" />
-          <ellipse cx="0" cy="-1" rx="56" ry="11" fill="#1a1a1a" />
-          {/* grooves */}
-          <ellipse cx="0" cy="0" rx="48" ry="10" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
-          <ellipse cx="0" cy="0" rx="40" ry="8" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
-          <ellipse cx="0" cy="0" rx="32" ry="6" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
-          {/* label */}
-          <ellipse cx="0" cy="0" rx="14" ry="3" fill="#c44a4a" />
-          <circle cx="0" cy="0" r="1.5" fill="#3a2113" />
+      <g
+        onClick={onClick}
+        style={interactive ? { cursor: "pointer" } : undefined}
+        className={interactive ? "barnhouse-recordplayer" : undefined}
+        tabIndex={interactive ? 0 : undefined}
+        role={interactive ? "button" : undefined}
+        aria-label={interactive ? "Open the record player" : undefined}
+        onKeyDown={
+          interactive
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onClick?.();
+                }
+              }
+            : undefined
+        }
+      >
+        {/* base */}
+        <rect x="0" y="0" width={w} height={h} rx="4" fill="#3a2113" />
+        <rect x="0" y="0" width={w} height="8" fill="#5e3a25" />
+        <rect x="0" y={h - 4} width={w} height="4" fill="#1a0a02" />
+        {/* turntable platter */}
+        <g transform={`translate(${w * 0.32}, -6)`}>
+          <ellipse cx="0" cy="6" rx="64" ry="10" fill="#1a0a02" />
+          <ellipse cx="0" cy="0" rx="64" ry="14" fill="#5e3a25" />
+          {/* the record itself spinning */}
+          <g
+            className="animate-record"
+            style={{ transformOrigin: "0 0", animationDuration: spinDuration }}
+          >
+            <ellipse cx="0" cy="0" rx="56" ry="12" fill="#0a0a0a" />
+            <ellipse cx="0" cy="-1" rx="56" ry="11" fill="#1a1a1a" />
+            {/* grooves */}
+            <ellipse cx="0" cy="0" rx="48" ry="10" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
+            <ellipse cx="0" cy="0" rx="40" ry="8" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
+            <ellipse cx="0" cy="0" rx="32" ry="6" fill="none" stroke="#2a2a2a" strokeWidth="0.5" />
+            {/* label */}
+            <ellipse cx="0" cy="0" rx="14" ry="3" fill="#c44a4a" />
+            <circle cx="0" cy="0" r="1.5" fill="#3a2113" />
+          </g>
         </g>
-      </g>
-      {/* tone arm */}
-      <g transform={`translate(${w - 36}, -6)`}>
-        <circle cx="0" cy="0" r="6" fill="#c4a878" />
-        <line x1="0" y1="0" x2="-40" y2="20" stroke="#c4a878" strokeWidth="3" />
-        <circle cx="-40" cy="20" r="3" fill="#3a2113" />
-      </g>
-      {/* knobs */}
-      <circle cx="22" cy={h / 2} r="6" fill="#c4a878" />
-      <circle cx="22" cy={h / 2} r="2" fill="#3a2113" />
-      <circle cx="42" cy={h / 2} r="6" fill="#c4a878" />
-      <circle cx="42" cy={h / 2} r="2" fill="#3a2113" />
-      {/* musical notes drifting up */}
-      <g className="animate-twinkleSlow" style={{ transformOrigin: "0 0" }}>
-        <text x={w - 30} y={-30} fontFamily="serif" fontSize="22" fill="#ffd966" opacity="0.85">♪</text>
-        <text x={w - 12} y={-50} fontFamily="serif" fontSize="18" fill="#ffd966" opacity="0.65">♫</text>
+        {/* tone arm */}
+        <g transform={`translate(${w - 36}, -6)`}>
+          <circle cx="0" cy="0" r="6" fill="#c4a878" />
+          <line x1="0" y1="0" x2="-40" y2="20" stroke="#c4a878" strokeWidth="3" />
+          <circle cx="-40" cy="20" r="3" fill="#3a2113" />
+        </g>
+        {/* knobs */}
+        <circle cx="22" cy={h / 2} r="6" fill="#c4a878" />
+        <circle cx="22" cy={h / 2} r="2" fill="#3a2113" />
+        <circle cx="42" cy={h / 2} r="6" fill="#c4a878" />
+        <circle cx="42" cy={h / 2} r="2" fill="#3a2113" />
+        {/* musical notes drifting up — brighter when actively playing */}
+        <g style={{ transformOrigin: "0 0" }}>
+          <text
+            x={w - 30}
+            y={-30}
+            fontFamily="serif"
+            fontSize={active ? "26" : "22"}
+            fill="#ffd966"
+            opacity={active ? "1" : "0.85"}
+            className={active ? "animate-twinkle" : "animate-twinkleSlow"}
+          >
+            ♪
+          </text>
+          <text
+            x={w - 12}
+            y={-50}
+            fontFamily="serif"
+            fontSize={active ? "22" : "18"}
+            fill="#ffd966"
+            opacity={active ? "0.95" : "0.65"}
+            className={active ? "animate-twinkleSlow" : "animate-twinkle"}
+          >
+            ♫
+          </text>
+          {active && (
+            <text
+              x={w - 60}
+              y={-65}
+              fontFamily="serif"
+              fontSize="16"
+              fill="#ffd966"
+              opacity="0.85"
+              className="animate-twinkle"
+            >
+              ♩
+            </text>
+          )}
+        </g>
       </g>
     </g>
   );

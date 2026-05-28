@@ -36,6 +36,45 @@ The repo is a stock Next.js 14 app — Vercel auto-detects everything.
 
 That's it. Your cabin is live at `a-little-barn-house-xxxx.vercel.app`. Every `git push` to `main` redeploys.
 
+## Spotify record player (synced)
+
+The record player on the side table opens a music popup. You can search Spotify and play a track — and whatever the "DJ" plays automatically plays on the other person's record player at the same position. Both of you need Spotify Premium (the Web Playback SDK requires it).
+
+### One-time setup (developer dashboard)
+
+1. Go to https://developer.spotify.com/dashboard → log in → **Create app**.
+2. **App name:** anything. **APIs/SDKs:** check **Web API** AND **Web Playback SDK**.
+3. **Redirect URIs** — add **both**:
+   - `https://<your-vercel-url>/api/spotify/callback`
+   - `http://localhost:3000/api/spotify/callback`
+4. Save. From the app's settings page, grab **Client ID** and **Client Secret**.
+5. **User Management** → add both people's Spotify-account emails (the apps starts in development mode, which only allows pre-listed users — max 25, fine for two).
+
+### Env vars
+
+In Vercel **Settings → Environment Variables**, add (scope to Production + Preview + Development):
+
+```
+SPOTIFY_CLIENT_ID=<from step 4>
+SPOTIFY_CLIENT_SECRET=<from step 4>
+```
+
+Then **Deployments → ⋯ → Redeploy** (no build cache) on the latest deployment.
+
+### Using it
+
+- Click the record player in the cabin → popup opens.
+- First time per device: click **Connect Spotify** → approve on Spotify → bounced back.
+- Search a song → click it → both your and your partner's record players start spinning the same track. The "DJ" indicator shows who put it on.
+- Play/pause from either side affects both. Switching tracks works the same way.
+- The page polls every 3 seconds for music state and re-syncs if drift goes above 2 seconds.
+
+### Caveats
+
+- **Premium required for both.** Free Spotify accounts get an "account_error" from the SDK and the popup says so.
+- **The cabin tab becomes your active Spotify device.** Same as Spotify desktop pulling control off your phone — normal cross-device behavior.
+- **Auth tokens last 1 hour** and refresh automatically. If you ever see "Spotify auth expired", click Reconnect.
+
 ## How the note board works
 
 - Click the **mini fridge** in the cabin → a popup opens with all notes between you and your partner, newest first.
@@ -58,7 +97,7 @@ That's it. Your cabin is live at `a-little-barn-house-xxxx.vercel.app`. Every `g
 
 ## What's next
 
-- [ ] Music player — pick a record, play together (Web Audio + a small song picker)
+- [x] ~~Music player — pick a record, play together~~ ✓
 - [ ] Fridge snacks — leave each other little treats/drinks
 - [ ] Fireplace stoking — click to brighten the fire
 - [ ] Presence — see when the other one is "home"
@@ -69,11 +108,16 @@ That's it. Your cabin is live at `a-little-barn-house-xxxx.vercel.app`. Every `g
 ```
 app/
   layout.tsx                — root, font, metadata
-  page.tsx                  — wraps everything in <IdentityProvider><HomeClient/>
-  globals.css               — tailwind + starry body bg + fridge hover
+  page.tsx                  — wraps everything in providers + <HomeClient/>
+  globals.css               — tailwind + starry body bg + hover styles
   api/
     notes/route.ts          — GET (list) + POST (add)
     notes/seen/route.ts     — POST (mark current user as seen)
+    spotify/login           — kick off OAuth (?user=jason)
+    spotify/callback        — Spotify redirects back here, stores tokens
+    spotify/token           — short-lived access token for client SDK
+    spotify/state           — shared playback state (sync source of truth)
+    spotify/search          — search Spotify, server-proxied
   components/
     Frame.tsx               — outer PBS-Kids style frame
     CabinScene.tsx          — the SVG cabin (sub-components per item)
@@ -81,10 +125,13 @@ app/
     IdentityProvider.tsx    — localStorage-backed jason/melisa context
     IdentityPicker.tsx      — first-visit modal
     NotesPopup.tsx          — the note board UI
+    SpotifyProvider.tsx     — SDK init + sync engine
+    MusicPlayerPanel.tsx    — the record-player popup UI
 lib/
   types.ts                  — Note, UserId, unreadCount()
   store.ts                  — Upstash Redis + in-memory fallback
   notes.ts                  — server-side note read/write helpers
+  spotify.ts                — Spotify types, tokens, playback state, OAuth nonces
 ```
 
 Each cabin element is its own sub-component inside `CabinScene.tsx` — easy to lift out and make interactive when you're ready for the music player and snacks.

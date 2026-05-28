@@ -1,10 +1,13 @@
 import { HomeClient } from "./components/HomeClient";
 import { IdentityProvider } from "./components/IdentityProvider";
+import { SpotifyProvider } from "./components/SpotifyProvider";
 
 export default function Home() {
   return (
     <IdentityProvider>
-      <HomeClient />
+      <SpotifyProvider>
+        <HomeClient />
+      </SpotifyProvider>
     </IdentityProvider>
   );
 }

@@ -5,66 +5,88 @@ import { Frame } from "./Frame";
 import { CabinScene } from "./CabinScene";
 import { IdentityPicker } from "./IdentityPicker";
 import { NotesPopup } from "./NotesPopup";
+import { MusicPlayerPanel } from "./MusicPlayerPanel";
 import { useIdentity } from "./IdentityProvider";
+import { useSpotify } from "./SpotifyProvider";
 import { unreadCount, type NotesState } from "@/lib/types";
 
 const POLL_MS = 15_000;
 
 /**
- * Top-level client wrapper around the cabin. Owns:
- *   • polling for note state (every 15s when tab is visible)
- *   • opening/closing the notes popup
- *   • marking notes as seen when popup opens
- *   • surfacing the unread "!" badge on the fridge
+ * Top-level client wrapper. Owns:
+ *   • notes polling + popup
+ *   • music popup open/close
+ *   • routing OAuth callback params (spotify_connected / spotify_error)
+ *   • surfacing the fridge "!" badge
  */
 export function HomeClient() {
   const { identity, clearIdentity, hydrated } = useIdentity();
-  const [state, setState] = useState<NotesState | null>(null);
-  const [popupOpen, setPopupOpen] = useState(false);
+  const { state: musicState } = useSpotify();
+  const [notesState, setNotesState] = useState<NotesState | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [musicOpen, setMusicOpen] = useState(false);
+  const [oauthFlash, setOauthFlash] = useState<string | null>(null);
   const inFlight = useRef(false);
 
-  // Fetch latest state. Skips overlapping calls.
-  const refresh = useCallback(async () => {
+  /* ─── OAuth callback flash + URL cleanup ─────────────────────── */
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const connected = url.searchParams.get("spotify_connected");
+    const err = url.searchParams.get("spotify_error");
+    if (connected) {
+      setOauthFlash(`Spotify connected as ${connected === "jason" ? "Jason" : "Melisa"}.`);
+      setMusicOpen(true);
+    } else if (err) {
+      setOauthFlash(`Spotify connection failed: ${err}`);
+    }
+    if (connected || err) {
+      url.searchParams.delete("spotify_connected");
+      url.searchParams.delete("spotify_error");
+      window.history.replaceState({}, "", url.toString());
+      // auto-dismiss flash after 4s
+      setTimeout(() => setOauthFlash(null), 4000);
+    }
+  }, []);
+
+  /* ─── notes polling ───────────────────────────────────────────── */
+  const refreshNotes = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
       const res = await fetch("/api/notes", { cache: "no-store" });
       if (!res.ok) throw new Error(`fetch failed (${res.status})`);
       const data = (await res.json()) as NotesState;
-      setState(data);
+      setNotesState(data);
     } catch (err) {
-      // swallow — we'll try again next tick
       console.warn("notes refresh failed", err);
     } finally {
       inFlight.current = false;
     }
   }, []);
 
-  // Initial load + polling
   useEffect(() => {
     if (!identity) return;
-    refresh();
+    refreshNotes();
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "visible") refreshNotes();
     }, POLL_MS);
-    function onVisible() {
-      if (document.visibilityState === "visible") refresh();
-    }
-    document.addEventListener("visibilitychange", onVisible);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshNotes();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onVis);
     };
-  }, [identity, refresh]);
+  }, [identity, refreshNotes]);
 
+  /* ─── fridge handler ─────────────────────────────────────────── */
   const handleFridgeClick = useCallback(async () => {
     if (!identity) return;
-    setPopupOpen(true);
-    // Optimistically clear the unread badge by bumping lastSeen locally
-    setState((s) =>
+    setNotesOpen(true);
+    setNotesState((s) =>
       s ? { ...s, lastSeen: { ...s.lastSeen, [identity]: Date.now() } } : s
     );
-    // Also persist server-side so the badge stays cleared next load
     try {
       await fetch("/api/notes/seen", {
         method: "POST",
@@ -74,9 +96,10 @@ export function HomeClient() {
     } catch (err) {
       console.warn("mark-seen failed", err);
     }
-    refresh();
-  }, [identity, refresh]);
+    refreshNotes();
+  }, [identity, refreshNotes]);
 
+  /* ─── note submit ────────────────────────────────────────────── */
   const handleSubmitNote = useCallback(
     async (text: string) => {
       if (!identity) throw new Error("no identity");
@@ -91,13 +114,17 @@ export function HomeClient() {
           typeof data.error === "string" ? data.error : "send failed"
         );
       }
-      await refresh();
+      await refreshNotes();
     },
-    [identity, refresh]
+    [identity, refreshNotes]
   );
 
-  // Don't render the cabin while we wait for localStorage — avoids a flicker
-  // of the identity picker on revisits.
+  /* ─── record player handler ──────────────────────────────────── */
+  const handleRecordPlayerClick = useCallback(() => {
+    if (!identity) return;
+    setMusicOpen(true);
+  }, [identity]);
+
   if (!hydrated) {
     return (
       <main className="min-h-screen flex items-center justify-center" aria-hidden>
@@ -106,7 +133,8 @@ export function HomeClient() {
     );
   }
 
-  const unread = identity && state ? unreadCount(state, identity) : 0;
+  const unread = identity && notesState ? unreadCount(notesState, identity) : 0;
+  const musicPlaying = !!(musicState?.isPlaying && musicState?.trackUri);
 
   return (
     <>
@@ -115,10 +143,11 @@ export function HomeClient() {
           <CabinScene
             onFridgeClick={identity ? handleFridgeClick : undefined}
             fridgeUnread={unread > 0}
+            onRecordPlayerClick={identity ? handleRecordPlayerClick : undefined}
+            recordPlayerActive={musicPlaying}
           />
         </Frame>
 
-        {/* Tiny "who am I?" toggle, only visible once an identity is picked. */}
         {identity && (
           <button
             type="button"
@@ -129,20 +158,34 @@ export function HomeClient() {
             i'm {identity === "jason" ? "Jason" : "Melisa"} · switch
           </button>
         )}
+
+        {/* OAuth flash */}
+        {oauthFlash && (
+          <div
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-40 font-playful text-sm text-night-deep rounded-full px-4 py-2 shadow-lg"
+            style={{ background: "linear-gradient(135deg, #ffd966 0%, #ff9b3a 100%)" }}
+          >
+            {oauthFlash}
+          </div>
+        )}
       </main>
 
-      {/* First-visit picker */}
       <IdentityPicker />
 
-      {/* Notes popup */}
       {identity && (
-        <NotesPopup
-          open={popupOpen}
-          onClose={() => setPopupOpen(false)}
-          state={state}
-          viewer={identity}
-          onSubmit={handleSubmitNote}
-        />
+        <>
+          <NotesPopup
+            open={notesOpen}
+            onClose={() => setNotesOpen(false)}
+            state={notesState}
+            viewer={identity}
+            onSubmit={handleSubmitNote}
+          />
+          <MusicPlayerPanel
+            open={musicOpen}
+            onClose={() => setMusicOpen(false)}
+          />
+        </>
       )}
     </>
   );

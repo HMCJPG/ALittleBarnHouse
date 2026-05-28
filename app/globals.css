@@ -46,13 +46,17 @@ body::before { animation: globalTwinkle 6s ease-in-out infinite; }
    Note: we deliberately do NOT use CSS `transform` here because it would
    override the SVG `transform` attribute that positions the fridge and
    make it teleport across the canvas. Filter-only effects are safe. */
-.barnhouse-fridge {
+.barnhouse-fridge,
+.barnhouse-recordplayer {
   transition: filter 180ms ease;
 }
 .barnhouse-fridge:hover,
-.barnhouse-fridge:focus-visible {
+.barnhouse-fridge:focus-visible,
+.barnhouse-recordplayer:hover,
+.barnhouse-recordplayer:focus-visible {
   filter: drop-shadow(0 4px 10px rgba(255, 200, 130, 0.6)) brightness(1.07);
 }
-.barnhouse-fridge:focus-visible {
+.barnhouse-fridge:focus-visible,
+.barnhouse-recordplayer:focus-visible {
   outline: none;
 }
