@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { NavArrow, NavArrowDefs } from "./NavArrow";
 
 /**
  * The cozy cabin interior — looking IN from the missing fourth wall.
@@ -27,6 +28,8 @@ export type CabinSceneProps = {
   onRecordPlayerClick?: () => void;
   /** Whether the record player is "active" (music currently spinning/playing). */
   recordPlayerActive?: boolean;
+  /** Called when the user clicks the left-pointing gold arrow → parlor. */
+  onLeftArrowClick?: () => void;
 };
 
 export function CabinScene({
@@ -34,6 +37,7 @@ export function CabinScene({
   fridgeUnread = false,
   onRecordPlayerClick,
   recordPlayerActive = false,
+  onLeftArrowClick,
 }: CabinSceneProps = {}) {
   return (
     <svg
@@ -77,6 +81,15 @@ export function CabinScene({
 
       {/* === PET === */}
       <SleepingCat x={680} y={810} />
+
+      {/* === ROOM NAVIGATION === */}
+      <NavArrow
+        x={180}
+        y={935}
+        direction="left"
+        onClick={onLeftArrowClick}
+        label="Go to the parlor"
+      />
 
       {/* === WARM GLOW OVERLAYS (front-most) === */}
       <FireGlowWash />
@@ -161,6 +174,8 @@ function SceneDefs() {
         <line x1="140" y1="60" x2="140" y2="120" stroke="#2a1709" strokeWidth="1.2" opacity="0.4" />
         <line x1="40" y1="120" x2="40" y2="180" stroke="#2a1709" strokeWidth="1.2" opacity="0.4" />
       </pattern>
+
+      <NavArrowDefs />
     </defs>
   );
 }

@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Frame } from "./Frame";
 import { CabinScene } from "./CabinScene";
+import { ParlorScene } from "./ParlorScene";
 import { IdentityPicker } from "./IdentityPicker";
 import { NotesPopup } from "./NotesPopup";
 import { MusicPlayerPanel } from "./MusicPlayerPanel";
 import { useIdentity } from "./IdentityProvider";
 import { useSpotify } from "./SpotifyProvider";
 import { unreadCount, type NotesState } from "@/lib/types";
+
+type Room = "cabin" | "parlor";
 
 const POLL_MS = 15_000;
 
@@ -26,6 +29,7 @@ export function HomeClient() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
   const [oauthFlash, setOauthFlash] = useState<string | null>(null);
+  const [room, setRoom] = useState<Room>("cabin");
   const inFlight = useRef(false);
 
   /* ─── OAuth callback flash + URL cleanup ─────────────────────── */
@@ -140,12 +144,31 @@ export function HomeClient() {
     <>
       <main className="min-h-screen flex items-start sm:items-center justify-center relative py-4 sm:py-2">
         <Frame>
-          <CabinScene
-            onFridgeClick={identity ? handleFridgeClick : undefined}
-            fridgeUnread={unread > 0}
-            onRecordPlayerClick={identity ? handleRecordPlayerClick : undefined}
-            recordPlayerActive={musicPlaying}
-          />
+          {/* Two rooms sit side-by-side; the wrapper slides left/right to
+              reveal whichever is "current". Parlor is in DOM first so it's
+              physically to the left of the cabin. */}
+          <div
+            className="absolute inset-0 flex transition-transform duration-500 ease-out"
+            style={{
+              width: "200%",
+              transform: `translateX(${room === "parlor" ? "0%" : "-50%"})`,
+            }}
+          >
+            <div className="w-1/2 h-full shrink-0">
+              <ParlorScene onRightArrowClick={() => setRoom("cabin")} />
+            </div>
+            <div className="w-1/2 h-full shrink-0">
+              <CabinScene
+                onFridgeClick={identity ? handleFridgeClick : undefined}
+                fridgeUnread={unread > 0}
+                onRecordPlayerClick={
+                  identity ? handleRecordPlayerClick : undefined
+                }
+                recordPlayerActive={musicPlaying}
+                onLeftArrowClick={() => setRoom("parlor")}
+              />
+            </div>
+          </div>
         </Frame>
 
         {identity && (

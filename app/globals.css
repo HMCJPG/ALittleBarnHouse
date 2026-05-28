@@ -47,16 +47,34 @@ body::before { animation: globalTwinkle 6s ease-in-out infinite; }
    override the SVG `transform` attribute that positions the fridge and
    make it teleport across the canvas. Filter-only effects are safe. */
 .barnhouse-fridge,
-.barnhouse-recordplayer {
+.barnhouse-recordplayer,
+.barnhouse-navarrow {
   transition: filter 180ms ease;
 }
 .barnhouse-fridge:hover,
 .barnhouse-fridge:focus-visible,
 .barnhouse-recordplayer:hover,
-.barnhouse-recordplayer:focus-visible {
-  filter: drop-shadow(0 4px 10px rgba(255, 200, 130, 0.6)) brightness(1.07);
+.barnhouse-recordplayer:focus-visible,
+.barnhouse-navarrow:hover,
+.barnhouse-navarrow:focus-visible {
+  filter: drop-shadow(0 4px 10px rgba(255, 200, 130, 0.7)) brightness(1.1);
 }
 .barnhouse-fridge:focus-visible,
-.barnhouse-recordplayer:focus-visible {
+.barnhouse-recordplayer:focus-visible,
+.barnhouse-navarrow:focus-visible {
   outline: none;
+}
+
+/* Gentle pulsing glow on the nav arrow so it reads as interactive — we use
+   filter (not transform) so the SVG transform attribute that positions the
+   arrow doesn't get clobbered. */
+@keyframes navArrowGlow {
+  0%, 100% { filter: drop-shadow(0 2px 4px rgba(255, 207, 92, 0.25)); }
+  50%      { filter: drop-shadow(0 4px 10px rgba(255, 207, 92, 0.65)); }
+}
+.barnhouse-navarrow { animation: navArrowGlow 2.4s ease-in-out infinite; }
+/* Hover wins over the idle glow. */
+.barnhouse-navarrow:hover,
+.barnhouse-navarrow:focus-visible {
+  animation: none;
 }
