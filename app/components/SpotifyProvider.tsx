@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useIdentity } from "./IdentityProvider";
 import type { UserId } from "@/lib/types";
-import type { PlaybackState } from "@/lib/spotify";
+import type { PlaybackState, TrackInfo } from "@/lib/spotify";
 
 /**
  * Wraps the Spotify Web Playback SDK + sync polling.
@@ -71,6 +71,9 @@ type SpotifySDKState = {
 
 const POLL_MS = 3000;
 const SEEK_DRIFT_MS = 2000;
+const TRACK_END_GRACE_MS = 800; // small buffer so we don't skip a hair early
+const DEFAULT_VOLUME = 0.5;
+const volumeKey = (u: UserId) => `barnhouse:volume:${u}`;
 
 type ConnectionStatus =
   | "idle" // not initialized yet
@@ -90,19 +93,20 @@ type SpotifyCtxValue = {
   /** Login URL for the current user. */
   loginHref: string | null;
   /** Start playing a track. DJ-initiated. */
-  play: (track: {
-    uri: string;
-    id: string;
-    name: string;
-    artists: string;
-    album: string;
-    art: string | null;
-    durationMs: number;
-  }) => Promise<void>;
+  play: (track: TrackInfo) => Promise<void>;
+  /** Append a track to the shared queue. */
+  queueTrack: (track: TrackInfo) => Promise<void>;
+  /** Advance to the next queued track (or pause if queue is empty). */
+  skip: () => Promise<void>;
+  /** Remove a queued track by its queueId. */
+  removeFromQueue: (queueId: string) => Promise<void>;
   /** Toggle play/pause for the current track. */
   togglePlayPause: () => Promise<void>;
   /** Force a refresh of the shared state. */
   refresh: () => Promise<void>;
+  /** Local-device volume (0..1). Not synced. */
+  volume: number;
+  setVolume: (v: number) => void;
 };
 
 const Ctx = createContext<SpotifyCtxValue | null>(null);
@@ -128,6 +132,42 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const sdkLoadedRef = useRef(false);
   const pendingPlayRef = useRef<PlaybackState | null>(null);
+  /** Track URIs we've already fired a skip for, so we don't loop the API. */
+  const skipFiredForRef = useRef<string | null>(null);
+
+  /* ─── volume (local, per-device) ────────────────────────────────── */
+  const [volume, setVolumeState] = useState<number>(DEFAULT_VOLUME);
+  // Load volume from localStorage once we know the identity.
+  useEffect(() => {
+    if (!identity) return;
+    try {
+      const raw = window.localStorage.getItem(volumeKey(identity));
+      if (raw !== null) {
+        const v = Number(raw);
+        if (Number.isFinite(v) && v >= 0 && v <= 1) setVolumeState(v);
+      }
+    } catch {}
+  }, [identity]);
+  // Push volume to the SDK whenever it (or the player) changes.
+  useEffect(() => {
+    const p = playerRef.current;
+    if (p && status === "ready") {
+      p.setVolume(volume).catch(() => {});
+    }
+  }, [volume, status]);
+
+  const setVolume = useCallback(
+    (v: number) => {
+      const clamped = Math.min(1, Math.max(0, v));
+      setVolumeState(clamped);
+      if (identity) {
+        try {
+          window.localStorage.setItem(volumeKey(identity), String(clamped));
+        } catch {}
+      }
+    },
+    [identity]
+  );
 
   /* ─── connection bootstrapping ─────────────────────────────────── */
 
@@ -202,7 +242,7 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
 
     const player = new window.Spotify.Player({
       name: "A Little Barn House 🌲",
-      volume: 0.5,
+      volume,
       getOAuthToken: async (cb) => {
         try {
           const res = await fetch(`/api/spotify/token?user=${user}`, {
@@ -307,6 +347,54 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, status]);
 
+  /* ─── auto-advance on track end ───────────────────────────────── */
+  // Periodically check: if the current track's expected position is past
+  // its duration, fire a skip. Idempotent server-side (guarded by
+  // expectedCurrentUri) so a race between Jason and Melisa is fine —
+  // only the first call has effect.
+  useEffect(() => {
+    if (!identity || !state || !state.trackUri || !state.isPlaying) return;
+    if (state.durationMs <= 0) return;
+
+    const expectedPos =
+      state.positionMs + (Date.now() - state.positionUpdatedAt);
+    if (expectedPos < state.durationMs + TRACK_END_GRACE_MS) return;
+
+    // Don't fire twice for the same track.
+    if (skipFiredForRef.current === state.trackUri) return;
+    skipFiredForRef.current = state.trackUri;
+
+    const currentUri = state.trackUri;
+    (async () => {
+      try {
+        const res = await fetch("/api/spotify/queue/skip", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user: identity,
+            expectedCurrentUri: currentUri,
+          }),
+        });
+        if (res.ok) {
+          const updated = (await res.json()) as PlaybackState;
+          setState(updated);
+        }
+      } catch (err) {
+        console.warn("auto-skip failed", err);
+      }
+    })();
+  }, [state, identity]);
+  // When the current track changes, allow auto-skip to fire again.
+  useEffect(() => {
+    if (state?.trackUri && state.trackUri !== skipFiredForRef.current) {
+      // Only reset if a NEW track is current. If the same track is repeated
+      // (rare), we'd want to allow firing again on its next end too.
+      if (state.trackUri !== skipFiredForRef.current) {
+        skipFiredForRef.current = null;
+      }
+    }
+  }, [state?.trackUri]);
+
   async function reconcile(s: PlaybackState, forceApply: boolean) {
     const deviceId = deviceIdRef.current;
     if (!deviceId || !identity) return;
@@ -355,15 +443,7 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   /* ─── DJ actions (called by UI) ───────────────────────────────── */
 
   const play = useCallback(
-    async (track: {
-      uri: string;
-      id: string;
-      name: string;
-      artists: string;
-      album: string;
-      art: string | null;
-      durationMs: number;
-    }) => {
+    async (track: TrackInfo) => {
       if (!identity) return;
       const now = Date.now();
       const next: Partial<PlaybackState> & { dj: UserId } = {
@@ -385,6 +465,58 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(next),
       });
       if (!res.ok) throw new Error(`state update failed (${res.status})`);
+      const updated = (await res.json()) as PlaybackState;
+      setState(updated);
+    },
+    [identity]
+  );
+
+  const queueTrack = useCallback(
+    async (track: TrackInfo) => {
+      if (!identity) return;
+      // If nothing's playing, queueing should just play it immediately —
+      // saves the user a click and matches every other player's behavior.
+      const nothingPlaying = !state?.trackUri;
+      if (nothingPlaying) {
+        await play(track);
+        return;
+      }
+      const res = await fetch("/api/spotify/queue/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: identity, track }),
+      });
+      if (!res.ok) throw new Error(`queue add failed (${res.status})`);
+      const updated = (await res.json()) as PlaybackState;
+      setState(updated);
+    },
+    [identity, state, play]
+  );
+
+  const skip = useCallback(async () => {
+    if (!identity) return;
+    const res = await fetch("/api/spotify/queue/skip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user: identity,
+        expectedCurrentUri: state?.trackUri ?? null,
+      }),
+    });
+    if (!res.ok) throw new Error(`skip failed (${res.status})`);
+    const updated = (await res.json()) as PlaybackState;
+    setState(updated);
+  }, [identity, state]);
+
+  const removeFromQueue = useCallback(
+    async (queueId: string) => {
+      if (!identity) return;
+      const res = await fetch("/api/spotify/queue/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: identity, queueId }),
+      });
+      if (!res.ok) throw new Error(`remove failed (${res.status})`);
       const updated = (await res.json()) as PlaybackState;
       setState(updated);
     },
@@ -434,8 +566,13 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
           state,
           loginHref,
           play,
+          queueTrack,
+          skip,
+          removeFromQueue,
           togglePlayPause,
           refresh,
+          volume,
+          setVolume,
         }}
       >
         {children}

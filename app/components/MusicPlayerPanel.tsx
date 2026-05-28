@@ -4,14 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpotify } from "./SpotifyProvider";
 import { useIdentity } from "./IdentityProvider";
 import type { SearchTrack } from "@/app/api/spotify/search/route";
+import type { QueuedTrack } from "@/lib/spotify";
 
 /**
  * The record-player popup. Opens when the user clicks the record player.
  *
  * Layout:
  *   Header (title + close)
- *   Now Playing card (track art, name, artist, play/pause, DJ tag)
- *   Search box → results list (click a result to play)
+ *   Now Playing card (track art, name, artist, play/pause, skip, DJ tag)
+ *   Volume slider (per-device)
+ *   Up Next (queue) — each item has a remove button
+ *   Search box → results list (click a result to play now, + to queue)
  *   Footer: connect / disconnect, status
  */
 export function MusicPlayerPanel({
@@ -22,8 +25,19 @@ export function MusicPlayerPanel({
   onClose: () => void;
 }) {
   const { identity } = useIdentity();
-  const { status, state, loginHref, play, togglePlayPause, refresh } =
-    useSpotify();
+  const {
+    status,
+    state,
+    loginHref,
+    play,
+    queueTrack,
+    skip,
+    removeFromQueue,
+    togglePlayPause,
+    refresh,
+    volume,
+    setVolume,
+  } = useSpotify();
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchTrack[]>([]);
@@ -31,7 +45,6 @@ export function MusicPlayerPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Esc to close
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,12 +54,10 @@ export function MusicPlayerPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // Refresh state when opened
   useEffect(() => {
     if (open) refresh();
   }, [open, refresh]);
 
-  // Debounced search
   useEffect(() => {
     if (!query.trim() || !identity || status !== "ready") {
       setResults([]);
@@ -90,7 +101,6 @@ export function MusicPlayerPanel({
           art: t.art,
           durationMs: t.durationMs,
         });
-        // After playing, dismiss results to surface the now-playing card.
         setQuery("");
         setResults([]);
       } catch (err) {
@@ -100,6 +110,29 @@ export function MusicPlayerPanel({
       }
     },
     [play]
+  );
+
+  const onQueueResult = useCallback(
+    async (t: SearchTrack) => {
+      setActionError(null);
+      try {
+        await queueTrack({
+          uri: t.uri,
+          id: t.id,
+          name: t.name,
+          artists: t.artists,
+          album: t.album,
+          art: t.art,
+          durationMs: t.durationMs,
+        });
+        // Keep results visible — they can keep queueing more.
+      } catch (err) {
+        setActionError(
+          err instanceof Error ? err.message : "Couldn't add to queue"
+        );
+      }
+    },
+    [queueTrack]
   );
 
   if (!open) return null;
@@ -119,7 +152,7 @@ export function MusicPlayerPanel({
       />
 
       <div
-        className="relative w-full max-w-xl max-h-[88vh] flex flex-col rounded-3xl overflow-hidden shadow-2xl"
+        className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-3xl overflow-hidden shadow-2xl"
         style={{
           background: "linear-gradient(180deg, #fff9ec 0%, #f7eed2 100%)",
           boxShadow:
@@ -180,8 +213,54 @@ export function MusicPlayerPanel({
                 );
               }
             }}
+            onSkip={async () => {
+              setActionError(null);
+              try {
+                await skip();
+              } catch (err) {
+                setActionError(
+                  err instanceof Error ? err.message : "Couldn't skip"
+                );
+              }
+            }}
           />
         </section>
+
+        {/* volume slider — local-device only */}
+        <section className="px-5 sm:px-7 mt-3">
+          <VolumeSlider
+            value={volume}
+            onChange={setVolume}
+            disabled={status !== "ready"}
+          />
+        </section>
+
+        {/* queue */}
+        {state && state.queue.length > 0 && (
+          <section className="px-5 sm:px-7 mt-3">
+            <p className="font-playful text-xs uppercase tracking-wider text-cabin-wooddark/60 mb-1">
+              Up Next ({state.queue.length})
+            </p>
+            <ol className="space-y-1 max-h-40 overflow-y-auto -mx-1 px-1">
+              {state.queue.map((q) => (
+                <QueueRow
+                  key={q.queueId}
+                  track={q}
+                  onRemove={async () => {
+                    setActionError(null);
+                    try {
+                      await removeFromQueue(q.queueId);
+                    } catch (err) {
+                      setActionError(
+                        err instanceof Error ? err.message : "Couldn't remove"
+                      );
+                    }
+                  }}
+                />
+              ))}
+            </ol>
+          </section>
+        )}
 
         {/* search */}
         <section className="px-5 sm:px-7 mt-4 flex-1 overflow-hidden flex flex-col">
@@ -213,7 +292,12 @@ export function MusicPlayerPanel({
             )}
             {!searching &&
               results.map((t) => (
-                <SearchResultRow key={t.id} track={t} onPick={onPlayResult} />
+                <SearchResultRow
+                  key={t.id}
+                  track={t}
+                  onPlay={onPlayResult}
+                  onQueue={onQueueResult}
+                />
               ))}
             {!searching && query.trim() && results.length === 0 && (
               <p className="text-xs text-cabin-wooddark/40 font-playful py-3 text-center">
@@ -223,7 +307,6 @@ export function MusicPlayerPanel({
           </div>
         </section>
 
-        {/* footer / status */}
         <footer className="border-t border-cabin-wooddark/15 px-5 sm:px-7 py-3 bg-[#fffaf0]">
           <StatusLine status={status} loginHref={loginHref} />
           {actionError && (
@@ -241,13 +324,16 @@ function NowPlaying({
   state,
   status,
   onToggle,
+  onSkip,
 }: {
   state: ReturnType<typeof useSpotify>["state"];
   status: ReturnType<typeof useSpotify>["status"];
   onToggle: () => void;
+  onSkip: () => void;
 }) {
   const noTrack = !state || !state.trackUri;
   const canToggle = status === "ready" && !!state?.trackUri;
+  const canSkip = status === "ready" && !!state?.trackUri;
 
   return (
     <div
@@ -257,7 +343,6 @@ function NowPlaying({
         boxShadow: "0 4px 12px -4px rgba(0,0,0,0.4)",
       }}
     >
-      {/* album art / placeholder */}
       <div
         className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden grid place-items-center"
         style={{ background: "#0a0628" }}
@@ -279,7 +364,6 @@ function NowPlaying({
         )}
       </div>
 
-      {/* text + controls */}
       <div className="flex-1 min-w-0">
         {noTrack ? (
           <div>
@@ -307,51 +391,138 @@ function NowPlaying({
         )}
       </div>
 
-      {/* play/pause */}
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={!canToggle}
-        aria-label={state?.isPlaying ? "Pause" : "Play"}
-        className="shrink-0 w-12 h-12 rounded-full grid place-items-center text-night-deep disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105 active:scale-95"
-        style={{ background: "linear-gradient(135deg, #ffd966 0%, #ff9b3a 100%)" }}
-      >
-        {state?.isPlaying ? (
-          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
-            <rect x="4" y="3" width="4" height="14" rx="1" fill="currentColor" />
-            <rect x="12" y="3" width="4" height="14" rx="1" fill="currentColor" />
+      <div className="shrink-0 flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={!canToggle}
+          aria-label={state?.isPlaying ? "Pause" : "Play"}
+          className="w-12 h-12 rounded-full grid place-items-center text-night-deep disabled:opacity-40 disabled:cursor-not-allowed transition hover:scale-105 active:scale-95"
+          style={{ background: "linear-gradient(135deg, #ffd966 0%, #ff9b3a 100%)" }}
+        >
+          {state?.isPlaying ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
+              <rect x="4" y="3" width="4" height="14" rx="1" fill="currentColor" />
+              <rect x="12" y="3" width="4" height="14" rx="1" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
+              <path d="M5 3 L17 10 L5 17 Z" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onSkip}
+          disabled={!canSkip}
+          aria-label="Skip to next"
+          title={
+            state?.queue.length
+              ? `Skip to next (${state.queue.length} queued)`
+              : "Skip / stop"
+          }
+          className="w-9 h-9 rounded-full grid place-items-center text-play-cloud bg-play-cloud/10 disabled:opacity-30 disabled:cursor-not-allowed transition hover:bg-play-cloud/20 active:scale-95"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
+            <path d="M3 2 L12 8 L3 14 Z" fill="currentColor" />
+            <rect x="12" y="2" width="2" height="12" rx="0.5" fill="currentColor" />
           </svg>
-        ) : (
-          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
-            <path d="M5 3 L17 10 L5 17 Z" fill="currentColor" />
-          </svg>
-        )}
-      </button>
+        </button>
+      </div>
     </div>
   );
 }
 
-function SearchResultRow({
-  track,
-  onPick,
+function VolumeSlider({
+  value,
+  onChange,
+  disabled,
 }: {
-  track: SearchTrack;
-  onPick: (t: SearchTrack) => void;
+  value: number;
+  onChange: (v: number) => void;
+  disabled: boolean;
+}) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="flex items-center gap-3">
+      <VolumeIcon level={value} />
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={pct}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        disabled={disabled}
+        aria-label="Volume"
+        className="flex-1 accent-cabin-fire disabled:opacity-40"
+        style={{
+          // Light styling — actual thumb/track is browser default,
+          // which Tailwind's `accent-` colors recolor in modern browsers.
+          height: 4,
+        }}
+      />
+      <span className="font-playful text-xs text-cabin-wooddark/55 w-10 text-right tabular-nums">
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+function VolumeIcon({ level }: { level: number }) {
+  const showOne = level > 0.1;
+  const showTwo = level > 0.55;
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden className="text-cabin-wooddark/70">
+      <path
+        d="M3 10 L3 14 L7 14 L12 18 L12 6 L7 10 Z"
+        fill="currentColor"
+      />
+      {level === 0 && (
+        <path
+          d="M16 10 L21 15 M21 10 L16 15"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          fill="none"
+        />
+      )}
+      {showOne && level > 0 && (
+        <path
+          d="M16 9 Q19 12, 16 15"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          fill="none"
+          strokeLinecap="round"
+        />
+      )}
+      {showTwo && (
+        <path
+          d="M19 7 Q23 12, 19 17"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          fill="none"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
+
+function QueueRow({
+  track,
+  onRemove,
+}: {
+  track: QueuedTrack;
+  onRemove: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onPick(track)}
-      className="w-full text-left flex items-center gap-3 p-2 rounded-lg hover:bg-cabin-wooddark/5 focus:bg-cabin-wooddark/10 focus:outline-none transition"
-    >
-      <div
-        className="w-10 h-10 rounded shrink-0 bg-cabin-wooddark/10 overflow-hidden grid place-items-center"
-      >
+    <li className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-cabin-wooddark/5 group">
+      <div className="w-8 h-8 rounded shrink-0 bg-cabin-wooddark/10 overflow-hidden grid place-items-center">
         {track.art ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={track.art} alt="" className="w-full h-full object-cover" />
         ) : (
-          <span className="text-cabin-wooddark/30 text-lg" aria-hidden>♪</span>
+          <span className="text-cabin-wooddark/30" aria-hidden>♪</span>
         )}
       </div>
       <div className="flex-1 min-w-0">
@@ -359,13 +530,83 @@ function SearchResultRow({
           {track.name}
         </p>
         <p className="font-playful text-cabin-wooddark/60 text-xs truncate">
-          {track.artists}
+          {track.artists} · queued by{" "}
+          {track.addedBy === "jason" ? "Jason" : "Melisa"}
         </p>
       </div>
-      <span className="text-cabin-wooddark/30 font-playful text-xs shrink-0">
-        {formatDuration(track.durationMs)}
-      </span>
-    </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${track.name} from queue`}
+        className="shrink-0 w-7 h-7 rounded-full grid place-items-center text-cabin-wooddark/40 hover:text-cabin-wooddark hover:bg-cabin-wooddark/10 transition"
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+          <path
+            d="M2 2 L10 10 M10 2 L2 10"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </li>
+  );
+}
+
+function SearchResultRow({
+  track,
+  onPlay,
+  onQueue,
+}: {
+  track: SearchTrack;
+  onPlay: (t: SearchTrack) => void;
+  onQueue: (t: SearchTrack) => void;
+}) {
+  return (
+    <div className="group flex items-center gap-3 p-2 rounded-lg hover:bg-cabin-wooddark/5 transition">
+      <button
+        type="button"
+        onClick={() => onPlay(track)}
+        className="flex-1 flex items-center gap-3 min-w-0 text-left focus:outline-none"
+        aria-label={`Play ${track.name} by ${track.artists} now`}
+      >
+        <div className="w-10 h-10 rounded shrink-0 bg-cabin-wooddark/10 overflow-hidden grid place-items-center">
+          {track.art ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={track.art} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-cabin-wooddark/30 text-lg" aria-hidden>♪</span>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-playful text-cabin-wooddark text-sm truncate">
+            {track.name}
+          </p>
+          <p className="font-playful text-cabin-wooddark/60 text-xs truncate">
+            {track.artists}
+          </p>
+        </div>
+        <span className="text-cabin-wooddark/30 font-playful text-xs shrink-0">
+          {formatDuration(track.durationMs)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onQueue(track)}
+        aria-label={`Add ${track.name} to queue`}
+        title="Add to queue"
+        className="shrink-0 w-8 h-8 rounded-full grid place-items-center text-cabin-wooddark/50 hover:text-cabin-wooddark bg-cabin-wooddark/5 hover:bg-cabin-wooddark/15 transition"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+          <path
+            d="M7 2 L7 12 M2 7 L12 7"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+    </div>
   );
 }
 

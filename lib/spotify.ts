@@ -17,6 +17,24 @@ export type SpotifyTokens = {
   scope: string;
 };
 
+export type TrackInfo = {
+  uri: string;
+  id: string;
+  name: string;
+  artists: string;
+  album: string;
+  art: string | null;
+  durationMs: number;
+};
+
+export type QueuedTrack = TrackInfo & {
+  /** Stable id so we can remove a specific entry even if the same
+   *  track is queued twice. */
+  queueId: string;
+  addedBy: UserId;
+  addedAt: number;
+};
+
 export type PlaybackState = {
   trackUri: string | null; // e.g. "spotify:track:abc123"
   trackId: string | null;
@@ -33,6 +51,8 @@ export type PlaybackState = {
   /** Who set this state — drives the "Jason is DJing" indicator. */
   dj: UserId | null;
   updatedAt: number;
+  /** Up-next queue (FIFO). Empty if nothing queued. */
+  queue: QueuedTrack[];
 };
 
 export const EMPTY_STATE: PlaybackState = {
@@ -48,6 +68,7 @@ export const EMPTY_STATE: PlaybackState = {
   isPlaying: false,
   dj: null,
   updatedAt: 0,
+  queue: [],
 };
 
 export const SPOTIFY_SCOPES = [
@@ -134,11 +155,108 @@ export async function getAccessToken(u: UserId): Promise<string | null> {
 const STATE_KEY = "barnhouse:spotify:state";
 
 export async function readPlaybackState(): Promise<PlaybackState> {
-  return (await kvGet<PlaybackState>(STATE_KEY)) ?? EMPTY_STATE;
+  const raw = (await kvGet<PlaybackState>(STATE_KEY)) ?? EMPTY_STATE;
+  // Migration: older stored states won't have `queue` — fill it in.
+  if (!Array.isArray((raw as { queue?: unknown }).queue)) {
+    return { ...raw, queue: [] };
+  }
+  return raw;
 }
 
 export async function writePlaybackState(s: PlaybackState): Promise<void> {
   await kvSet(STATE_KEY, s);
+}
+
+/** Append a track to the shared queue. Returns the updated state. */
+export async function enqueueTrack(
+  track: TrackInfo,
+  addedBy: UserId
+): Promise<PlaybackState> {
+  const prev = await readPlaybackState();
+  const queued: QueuedTrack = {
+    ...track,
+    queueId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    addedBy,
+    addedAt: Date.now(),
+  };
+  const next: PlaybackState = {
+    ...prev,
+    queue: [...prev.queue, queued],
+    updatedAt: Date.now(),
+  };
+  await writePlaybackState(next);
+  return next;
+}
+
+/** Remove a queued track by its queueId. */
+export async function removeQueuedTrack(
+  queueId: string
+): Promise<PlaybackState> {
+  const prev = await readPlaybackState();
+  const next: PlaybackState = {
+    ...prev,
+    queue: prev.queue.filter((q) => q.queueId !== queueId),
+    updatedAt: Date.now(),
+  };
+  await writePlaybackState(next);
+  return next;
+}
+
+/**
+ * Advance to the next queued track. Returns the updated state.
+ *
+ * Idempotent: if `expectedCurrentUri` is provided and doesn't match the
+ * current track, this is a no-op. That guards against two clients
+ * racing to skip the same track at end-of-song.
+ */
+export async function skipToNext(
+  by: UserId,
+  expectedCurrentUri?: string | null
+): Promise<PlaybackState> {
+  const prev = await readPlaybackState();
+  if (
+    expectedCurrentUri !== undefined &&
+    expectedCurrentUri !== null &&
+    prev.trackUri !== expectedCurrentUri
+  ) {
+    // Already advanced — somebody else got here first.
+    return prev;
+  }
+
+  const [head, ...rest] = prev.queue;
+  if (!head) {
+    // Queue's empty — pause.
+    const next: PlaybackState = {
+      ...prev,
+      isPlaying: false,
+      positionMs: 0,
+      positionUpdatedAt: Date.now(),
+      dj: by,
+      updatedAt: Date.now(),
+    };
+    await writePlaybackState(next);
+    return next;
+  }
+
+  const now = Date.now();
+  const next: PlaybackState = {
+    ...prev,
+    trackUri: head.uri,
+    trackId: head.id,
+    trackName: head.name,
+    artistName: head.artists,
+    albumName: head.album,
+    albumArt: head.art,
+    durationMs: head.durationMs,
+    positionMs: 0,
+    positionUpdatedAt: now,
+    isPlaying: true,
+    dj: by,
+    queue: rest,
+    updatedAt: now,
+  };
+  await writePlaybackState(next);
+  return next;
 }
 
 /**
