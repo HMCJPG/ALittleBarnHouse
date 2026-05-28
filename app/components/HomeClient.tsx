@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Frame } from "./Frame";
 import { CabinScene } from "./CabinScene";
 import { ParlorScene } from "./ParlorScene";
+import { KitchenScene } from "./KitchenScene";
 import { IdentityPicker } from "./IdentityPicker";
 import { NotesPopup } from "./NotesPopup";
 import { MusicPlayerPanel } from "./MusicPlayerPanel";
@@ -11,7 +12,15 @@ import { useIdentity } from "./IdentityProvider";
 import { useSpotify } from "./SpotifyProvider";
 import { unreadCount, type NotesState } from "@/lib/types";
 
-type Room = "cabin" | "parlor";
+type Room = "parlor" | "cabin" | "kitchen";
+
+// Rooms are laid out left-to-right inside a 300%-wide flex container.
+// Index here = position in that container (parlor=0, cabin=1, kitchen=2).
+const ROOM_INDEX: Record<Room, number> = {
+  parlor: 0,
+  cabin: 1,
+  kitchen: 2,
+};
 
 const POLL_MS = 15_000;
 
@@ -144,20 +153,20 @@ export function HomeClient() {
     <>
       <main className="min-h-screen flex items-start sm:items-center justify-center relative py-4 sm:py-2">
         <Frame>
-          {/* Two rooms sit side-by-side; the wrapper slides left/right to
-              reveal whichever is "current". Parlor is in DOM first so it's
-              physically to the left of the cabin. */}
+          {/* Three rooms sit side-by-side inside a 300%-wide wrapper; the
+              wrapper slides horizontally to reveal whichever is "current".
+              Each room takes 1/3 of the wrapper = 100% of the stage. */}
           <div
             className="absolute inset-0 flex transition-transform duration-500 ease-out"
             style={{
-              width: "200%",
-              transform: `translateX(${room === "parlor" ? "0%" : "-50%"})`,
+              width: "300%",
+              transform: `translateX(-${ROOM_INDEX[room] * (100 / 3)}%)`,
             }}
           >
-            <div className="w-1/2 h-full shrink-0">
+            <div className="w-1/3 h-full shrink-0">
               <ParlorScene onRightArrowClick={() => setRoom("cabin")} />
             </div>
-            <div className="w-1/2 h-full shrink-0">
+            <div className="w-1/3 h-full shrink-0">
               <CabinScene
                 onFridgeClick={identity ? handleFridgeClick : undefined}
                 fridgeUnread={unread > 0}
@@ -166,7 +175,11 @@ export function HomeClient() {
                 }
                 recordPlayerActive={musicPlaying}
                 onLeftArrowClick={() => setRoom("parlor")}
+                onRightArrowClick={() => setRoom("kitchen")}
               />
+            </div>
+            <div className="w-1/3 h-full shrink-0">
+              <KitchenScene onLeftArrowClick={() => setRoom("cabin")} />
             </div>
           </div>
         </Frame>

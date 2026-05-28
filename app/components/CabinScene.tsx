@@ -30,6 +30,8 @@ export type CabinSceneProps = {
   recordPlayerActive?: boolean;
   /** Called when the user clicks the left-pointing gold arrow → parlor. */
   onLeftArrowClick?: () => void;
+  /** Called when the user clicks the right-pointing gold arrow → kitchen. */
+  onRightArrowClick?: () => void;
 };
 
 export function CabinScene({
@@ -38,6 +40,7 @@ export function CabinScene({
   onRecordPlayerClick,
   recordPlayerActive = false,
   onLeftArrowClick,
+  onRightArrowClick,
 }: CabinSceneProps = {}) {
   return (
     <svg
@@ -89,6 +92,13 @@ export function CabinScene({
         direction="left"
         onClick={onLeftArrowClick}
         label="Go to the parlor"
+      />
+      <NavArrow
+        x={1320}
+        y={935}
+        direction="right"
+        onClick={onRightArrowClick}
+        label="Go to the kitchen"
       />
 
       {/* === WARM GLOW OVERLAYS (front-most) === */}
